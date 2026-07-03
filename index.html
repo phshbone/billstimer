@@ -257,6 +257,73 @@
     .accent-orange { color: var(--orange); }
     .accent-green { color: var(--green); }
 
+
+
+    .plan-summary {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .summary-box {
+      border: 1px solid var(--soft-line);
+      border-radius: 16px;
+      padding: 10px;
+      background: rgba(0,0,0,0.22);
+      text-align: center;
+      font-weight: 900;
+    }
+
+    .summary-box span {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .5px;
+      margin-bottom: 4px;
+    }
+
+    .add-row {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .include-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 8px;
+      color: var(--text);
+      font-size: 15px;
+      font-weight: 900;
+      text-transform: none;
+      letter-spacing: 0;
+    }
+
+    input[type="checkbox"] {
+      width: 26px;
+      height: 26px;
+      min-width: 26px;
+      padding: 0;
+      border-radius: 8px;
+      accent-color: #2fd4ff;
+    }
+
+    .item.off {
+      opacity: .48;
+      filter: grayscale(.35);
+    }
+
+    .item-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
     @media (max-width: 420px) {
       .grid { grid-template-columns: 1fr; }
       .controls { grid-template-columns: 1fr 1fr; }
@@ -291,6 +358,7 @@
         <h2>quick start</h2>
         <label for="taskInput">one job for this block</label>
         <input id="taskInput" placeholder="Example: build timer screen" />
+        <button class="primary" id="nextPlannedBtn" style="width:100%; margin-top:10px;">Start Next Planned Block</button>
         <div class="grid" style="margin-top:12px;">
           <button class="mode-card primary" data-mode="Build Block" data-work="60" data-break="15">Build Block <span>60 work / 15 break</span></button>
           <button class="mode-card" data-mode="Quick Block" data-work="25" data-break="5">Quick Block <span>25 work / 5 break</span></button>
@@ -313,9 +381,32 @@
         <label for="shotInput">optional widget screenshot</label>
         <input id="shotInput" type="file" accept="image/*" />
       </div>
+
+      <div class="panel">
+        <h2>add one block manually</h2>
+        <label for="manualBlockText">block name</label>
+        <input id="manualBlockText" placeholder="Example: fold laundry" />
+        <label for="manualBlockType">block type</label>
+        <select id="manualBlockType">
+          <option>Build Block</option>
+          <option>Quick Block</option>
+          <option>House Block</option>
+          <option>External Task</option>
+          <option>Prep Block</option>
+          <option>Admin Block</option>
+          <option>Recovery Block</option>
+        </select>
+        <button class="primary" id="addManualBlockBtn" style="width:100%; margin-top:10px;">Add Block</button>
+      </div>
+
       <div class="panel">
         <h2>today's blocks</h2>
-        <div id="dayList" class="list"></div>
+        <div class="plan-summary">
+          <div class="summary-box"><span>selected</span><b id="selectedCount">0</b></div>
+          <div class="summary-box"><span>work time</span><b id="selectedTime">0m</b></div>
+          <div class="summary-box"><span>next</span><b id="nextBlockType">none</b></div>
+        </div>
+        <div id="dayList" class="list" style="margin-top:10px;"></div>
       </div>
     </section>
 
@@ -466,29 +557,72 @@
     return { type: 'Build Block', detail: 'focused project block', accent: 'accent-blue' };
   }
 
+  function blockMinutes(b) {
+    if (b.type.includes('House')) return 45;
+    if (b.type.includes('Prep')) return 15;
+    if (b.type.includes('Recovery')) return 30;
+    if (b.type.includes('Admin')) return 25;
+    if (b.type.includes('Quick')) return 25;
+    if (b.type.includes('External')) return 25;
+    return 60;
+  }
+
+  function applyBlockToTimer(b) {
+    $('taskInput').value = b.text;
+    currentTask = b.text;
+    if (b.type.includes('House')) { mode = 'House Block'; workSeconds = 45*60; breakSeconds = 15*60; }
+    else if (b.type.includes('Prep')) { mode = 'External Prep'; workSeconds = 15*60; breakSeconds = 0; }
+    else if (b.type.includes('Recovery')) { mode = 'Recovery Block'; workSeconds = 30*60; breakSeconds = 0; }
+    else if (b.type.includes('External') || b.type.includes('Admin') || b.type.includes('Quick')) { mode = 'Quick Block'; workSeconds = 25*60; breakSeconds = 5*60; }
+    else { mode = 'Build Block'; workSeconds = 60*60; breakSeconds = 15*60; }
+    remaining = workSeconds; phase = 'ready'; showScreen('screenTimer'); renderTimer(); save();
+  }
+
   function renderDay() {
     const list = $('dayList');
     list.innerHTML = '';
+    state.blocks.forEach(b => { if (b.included === undefined) b.included = true; });
+    const selected = state.blocks.filter(b => b.included !== false);
+    $('selectedCount').textContent = selected.length;
+    $('selectedTime').textContent = selected.reduce((sum, b) => sum + blockMinutes(b), 0) + 'm';
+    $('nextBlockType').textContent = selected[0]?.type.replace(' Task','').replace(' Block','').toLowerCase() || 'none';
     if (!state.blocks.length) {
-      list.innerHTML = '<div class="notice">No blocks planned yet.</div>';
+      list.innerHTML = '<div class="notice">No blocks planned yet. Type items and tap Create Blocks, or add one block manually.</div>';
       return;
     }
     state.blocks.forEach((b, i) => {
       const div = document.createElement('div');
-      div.className = 'item';
-      div.innerHTML = `<strong class="${b.accent}">${b.type}</strong><span>${b.text}</span><span>${b.detail}</span><button class="small primary" data-start-block="${i}">Start this block</button>`;
+      div.className = 'item' + (b.included === false ? ' off' : '');
+      div.innerHTML = `<label class="include-row"><input type="checkbox" data-toggle-block="${i}" ${b.included === false ? '' : 'checked'} /> Include in today</label><strong class="${b.accent || 'accent-blue'}">${b.type}</strong><span>${b.text}</span><span>${b.detail || blockMinutes(b) + ' min block'}</span><div class="item-actions"><button class="small primary" data-start-block="${i}">Start this block</button><button class="small danger" data-delete-block="${i}">Delete</button></div>`;
       list.appendChild(div);
     });
-    list.querySelectorAll('[data-start-block]').forEach(btn => btn.addEventListener('click', () => {
-      const b = state.blocks[Number(btn.dataset.startBlock)];
-      $('taskInput').value = b.text;
-      currentTask = b.text;
-      if (b.type.includes('House')) { mode = 'House Block'; workSeconds = 45*60; breakSeconds = 15*60; }
-      else if (b.type.includes('External') || b.type.includes('Admin')) { mode = 'Quick Block'; workSeconds = 25*60; breakSeconds = 5*60; }
-      else { mode = 'Build Block'; workSeconds = 60*60; breakSeconds = 15*60; }
-      remaining = workSeconds; phase = 'ready'; showScreen('screenTimer'); renderTimer(); save();
-    }));
   }
+
+  $('dayList').addEventListener('click', (e) => {
+    const startBtn = e.target.closest('[data-start-block]');
+    const deleteBtn = e.target.closest('[data-delete-block]');
+    if (startBtn) {
+      const b = state.blocks[Number(startBtn.dataset.startBlock)];
+      applyBlockToTimer(b);
+    }
+    if (deleteBtn) {
+      state.blocks.splice(Number(deleteBtn.dataset.deleteBlock), 1);
+      save(); renderDay();
+    }
+  });
+
+  $('dayList').addEventListener('change', (e) => {
+    if (!e.target.matches('[data-toggle-block]')) return;
+    const i = Number(e.target.dataset.toggleBlock);
+    state.blocks[i].included = e.target.checked;
+    save(); renderDay();
+  });
+
+  $('nextPlannedBtn').addEventListener('click', () => {
+    const next = state.blocks.find(b => b.included !== false);
+    if (!next) { showScreen('screenPlan'); return; }
+    applyBlockToTimer(next);
+  });
 
   $('parseDayBtn').addEventListener('click', () => {
     const lines = $('dailyText').value.split('\n').map(s => s.trim()).filter(Boolean);
@@ -496,16 +630,27 @@
     lines.forEach(line => {
       const c = classify(line);
       if (c.type.includes('External') && /doctor|appointment|work|poll|meeting|shift/.test(line.toLowerCase())) {
-        blocks.push({ text: 'Prep: gather clothes, shoes, bags, keys, papers', type: 'Prep Block', detail: '15–30 min before leaving', accent: 'accent-orange' });
+        blocks.push({ text: 'Prep: gather clothes, shoes, bags, keys, papers', type: 'Prep Block', detail: '15–30 min before leaving', accent: 'accent-orange', included: true });
       }
-      blocks.push({ text: line, ...c });
-      if (/doctor|appointment|medical|dentist/.test(line.toLowerCase())) blocks.push({ text: 'Recovery after outside task', type: 'Recovery Block', detail: 'rest before next work block', accent: 'accent-green' });
+      blocks.push({ text: line, ...c, included: true });
+      if (/doctor|appointment|medical|dentist/.test(line.toLowerCase())) blocks.push({ text: 'Recovery after outside task', type: 'Recovery Block', detail: 'rest before next work block', accent: 'accent-green', included: true });
     });
     state.blocks = blocks;
     save(); renderDay();
   });
 
   $('clearDayBtn').addEventListener('click', () => { state.blocks = []; $('dailyText').value = ''; save(); renderDay(); });
+
+  $('addManualBlockBtn').addEventListener('click', () => {
+    const text = $('manualBlockText').value.trim();
+    if (!text) return;
+    const type = $('manualBlockType').value;
+    const accent = type.includes('House') || type.includes('Recovery') ? 'accent-green' : type.includes('External') || type.includes('Prep') ? 'accent-orange' : type.includes('Admin') ? 'accent-blue' : 'accent-blue';
+    state.blocks.push({ text, type, detail: blockMinutes({type}) + ' min block', accent, included: true });
+    $('manualBlockText').value = '';
+    save(); renderDay();
+  });
+
 
   $('shotInput').addEventListener('change', () => {
     const file = $('shotInput').files[0];
